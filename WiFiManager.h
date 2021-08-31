@@ -129,13 +129,16 @@ class WiFiManagerParameter {
     int         getValueLength() const;
     int         getLabelPlacement() const;
     const char *getCustomHTML() const;
-    void        setValue(const char *defaultValue, int length);
+    virtual void setValue(const char *value);
 
   protected:
     void init(const char *id, const char *label, const char *defaultValue, int length, const char *custom, int labelPlacement);
 
+    void setInitialValue(const char *defaultValue, int length);
+
   private:
     WiFiManagerParameter& operator=(const WiFiManagerParameter&);
+  protected:
     const char *_id;
     const char *_label;
     char       *_value;
@@ -156,7 +159,7 @@ class WiFiManager
 
     // auto connect to saved wifi, or custom, and start config portal on failures
     boolean       autoConnect();
-    boolean       autoConnect(char const *apName, char const *apPassword = NULL);
+    boolean       autoConnect(char const *apName, char const *apPassword = NULL, bool retryStaConnectInApMode = false);
 
     //manually start the config portal, autoconnect does this automatically on connect failure
     boolean       startConfigPortal(); // auto generates apname
@@ -281,6 +284,10 @@ class WiFiManager
     // toggle showing the saved wifi password in wifi form, could be a security issue.
     void          setShowPassword(boolean show);
     
+	// enable / disable HTTPD authorization for config portal
+	// Usefull when used with e.g. startWebPortal()
+	void          setHttpdAuthEnable(boolean enabled);
+
     //if false, disable captive portal redirection
     void          setCaptivePortalEnable(boolean enabled);
     
@@ -457,6 +464,7 @@ class WiFiManager
     int            _staShowDns            = 0;     // ternary 1=always show dns, 0=only if set, -1=never(cannot change dns via web!)
     boolean       _removeDuplicateAPs     = true;  // remove dup aps from wifiscan
     boolean       _showPassword           = false; // show or hide saved password on wifi form, might be a security issue!
+    volatile boolean _httpdAuthEnabled       = false; // require httpd authentication when accessing config portal
     boolean       _shouldBreakAfterConfig = false; // stop configportal on save failure
     boolean       _configPortalIsBlocking = true;  // configportal enters blocking loop 
     boolean       _enableCaptivePortal    = true;  // enable captive portal redirection
@@ -569,7 +577,9 @@ class WiFiManager
     bool          WiFiSetCountry();
 
     #ifdef ESP32
-    void   WiFiEvent(WiFiEvent_t event, system_event_info_t info);
+	// IDF V4.2.x compliance:
+    //void   WiFiEvent(WiFiEvent_t event, system_event_info_t info);
+    void   WiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info);
     #endif
 
     // output helpers
@@ -612,6 +622,7 @@ class WiFiManager
         DEBUG_MAX       = 4
     } wm_debuglevel_t;
 
+    boolean _retryStaConnectInApMode = false;
     boolean _debug  = true;
     String _debugPrefix = FPSTR(S_debugPrefix);
 

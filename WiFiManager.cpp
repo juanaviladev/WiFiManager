@@ -18,6 +18,13 @@
 uint8_t WiFiManager::_lastconxresulttmp = WL_IDLE_STATUS;
 #endif
 
+#ifndef HTTPD_USER
+#define HTTPD_USER "admin"
+#endif
+#ifndef HTTPD_PASSWD
+#define HTTPD_PASSWD "1234"
+#endif
+
 /**
  * --------------------------------------------------------------------------------
  *  WiFiManagerParameter
@@ -58,7 +65,7 @@ void WiFiManagerParameter::init(const char *id, const char *label, const char *d
   _label          = label;
   _labelPlacement = labelPlacement;
   _customHTML     = custom;
-  setValue(defaultValue,length);
+  setInitialValue(defaultValue,length);
 }
 
 WiFiManagerParameter::~WiFiManagerParameter() {
@@ -75,23 +82,27 @@ WiFiManagerParameter::~WiFiManagerParameter() {
 // }
 
 // @note debug is not available in wmparameter class
-void WiFiManagerParameter::setValue(const char *defaultValue, int length) {
+void WiFiManagerParameter::setInitialValue(const char *defaultValue, int length) {
   if(!_id){
-    // Serial.println("cannot set value of this parameter");
     return;
   }
   
-  // if(strlen(defaultValue) > length){
-  //   // Serial.println("defaultValue length mismatch");
-  //   // return false; //@todo bail 
-  // }
-
   _length = length;
   _value  = new char[_length + 1]; 
   memset(_value, 0, _length + 1); // explicit null
   
   if (defaultValue != NULL) {
     strncpy(_value, defaultValue, _length);
+  }
+}
+// @note debug is not available in wmparameter class
+void WiFiManagerParameter::setValue(const char *value) {
+  if(!_id){
+    return;
+  }
+
+  if (value != NULL) {
+    strncpy(_value, value, _length);
   }
 }
 const char* WiFiManagerParameter::getValue() const {
@@ -267,10 +278,13 @@ boolean WiFiManager::autoConnect() {
  * @param  {[type]} char const         *apPassword [description]
  * @return {[type]}      [description]
  */
-boolean WiFiManager::autoConnect(char const *apName, char const *apPassword) {
+boolean WiFiManager::autoConnect(char const *apName, char const *apPassword, bool retryStaConnectInApMode) {
   #ifdef WM_DEBUG_LEVEL
   DEBUG_WM(F("AutoConnect"));
   #endif
+
+  _retryStaConnectInApMode = retryStaConnectInApMode;
+
   if(getWiFiIsSaved()){
 
     _begin();
@@ -709,6 +723,9 @@ boolean  WiFiManager::startConfigPortal(char const *apName, char const *apPasswo
     if(_configPortalTimeout > 0) DEBUG_WM(DEBUG_VERBOSE,F("Portal Timeout In"),(String)(_configPortalTimeout/1000) + (String)F(" seconds"));
   #endif
 
+  unsigned long last_autoconnect_attempt = millis();
+  const unsigned long autoreconnect_interval = 15*1000; // retry every 10 seconds if no client is connected!
+  bool changedWiFiMode = false;
   // blocking loop waiting for config
   while(1){
 
@@ -724,6 +741,40 @@ boolean  WiFiManager::startConfigPortal(char const *apName, char const *apPasswo
 
     state = processConfigPortal();
     
+    // Attempt auto (re-)connect if a known WiFi AP is saved, the function is enabled, and there are no clients connected to our AP
+    // Retry every 15 seconds while the blocking config portal is active
+    if( _retryStaConnectInApMode && getWiFiIsSaved() && WiFi_softap_num_stations() == 0) {
+      if( millis() > last_autoconnect_attempt + autoreconnect_interval) {
+        #ifdef WM_DEBUG_LEVEL
+        DEBUG_WM(DEBUG_NOTIFY,F("Trying autoconnect during blocking ConfigPortal..."));
+        DEBUG_WM(DEBUG_NOTIFY,F("   AP :"), WiFi_SSID(true).c_str());
+        DEBUG_WM(DEBUG_NOTIFY,F("   pwd:"), WiFi_psk(true).c_str());
+        #endif
+
+        WiFi.mode(WIFI_MODE_APSTA);
+        changedWiFiMode = true;
+        WiFi.begin(WiFi_SSID(true).c_str(), WiFi_psk(true).c_str(), 0, NULL,true);
+        uint8_t connRes = waitForConnectResult(2500); // use default save timeout for saves to prevent bugs in esp->waitforconnectresult loop
+
+        if( WL_CONNECTED == connRes) {
+          shutdownConfigPortal();
+          state = WL_CONNECTED; // Break the loop!
+        }
+        last_autoconnect_attempt = millis();
+      }
+    }
+    else if (changedWiFiMode && WiFi_softap_num_stations() != 0) {
+      if(_disableSTA || (!WiFi.isConnected() && _disableSTAConn)){
+       // this fixes most ap problems, however, simply doing mode(WIFI_AP) does not work if sta connection is hanging, must `wifi_station_disconnect`
+        WiFi_Disconnect();
+        WiFi_enableSTA(false);
+        #ifdef WM_DEBUG_LEVEL
+        DEBUG_WM(DEBUG_VERBOSE,F("Disabling STA"));
+        #endif
+      }
+      changedWiFiMode = false;
+    }
+
     // status change, break
     if(state != WL_IDLE_STATUS){
         result = (state == WL_CONNECTED); // true if connected
@@ -1186,11 +1237,10 @@ void WiFiManager::handleRequest() {
   // void requestAuthentication(HTTPAuthMethod mode = BASIC_AUTH, const char* realm = NULL, const String& authFailMsg = String("") );
 
   // 2.3 NO AUTH available
-  bool testauth = false;
-  if(!testauth) return;
+  if(!_httpdAuthEnabled) return;
   
   DEBUG_WM(DEBUG_DEV,F("DOING AUTH"));
-  bool res = server->authenticate("admin","12345");
+  bool res = server->authenticate(HTTPD_USER, HTTPD_PASSWD);
   if(!res){
     #ifndef WM_NOAUTH
     server->requestAuthentication(HTTPAuthMethod::BASIC_AUTH); // DIGEST_AUTH
@@ -2714,6 +2764,17 @@ void WiFiManager::setShowPassword(boolean show){
 }
 
 /**
+ * toggle httpd password authentication
+ * if not enabled, anyone can modify the device settings!
+ * @since $dev
+ * @access public
+ * @param boolean alwaysShow [false]
+ */
+void WiFiManager::setHttpdAuthEnable(boolean enabled) {
+  _httpdAuthEnabled = enabled;
+}
+
+/**
  * toggle captive portal
  * if enabled, then devices that use captive portal checks will be redirected to root
  * if not you will automatically have to navigate to ip [192.168.4.1]
@@ -3079,7 +3140,7 @@ void WiFiManager::DEBUG_WM(wm_debuglevel_t level,Generic text,Genericb textb) {
     #endif
   }
   _debugPort.print(_debugPrefix);
-  if(_debugLevel >= debugLvlShow) _debugPort.print("["+(String)level+"] ");
+  if(_debugLevel >= debugLvlShow) _debugPort.printf("[%d] ", (int)level);
   _debugPort.print(text);
   if(textb){
     _debugPort.print(" ");
@@ -3489,7 +3550,8 @@ String WiFiManager::WiFi_psk(bool persistent) const {
 }
 
 #ifdef ESP32
-void WiFiManager::WiFiEvent(WiFiEvent_t event,system_event_info_t info){
+// void WiFiManager::WiFiEvent(WiFiEvent_t event,system_event_info_t info){
+void WiFiManager::WiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info){
     if(!_hasBegun){
       #ifdef WM_DEBUG_LEVEL
         // DEBUG_WM(DEBUG_VERBOSE,"[ERROR] WiFiEvent, not ready");
@@ -3502,6 +3564,7 @@ void WiFiManager::WiFiEvent(WiFiEvent_t event,system_event_info_t info){
     #ifdef WM_DEBUG_LEVEL
     // DEBUG_WM(DEBUG_VERBOSE,"[EVENT]",event);
     #endif
+#if 0
     if(event == SYSTEM_EVENT_STA_DISCONNECTED){
     #ifdef WM_DEBUG_LEVEL
       DEBUG_WM(DEBUG_VERBOSE,F("[EVENT] WIFI_REASON: "),info.disconnected.reason);
@@ -3523,6 +3586,29 @@ void WiFiManager::WiFiEvent(WiFiEvent_t event,system_event_info_t info){
     uint16_t scans = WiFi.scanComplete();
     WiFi_scanComplete(scans);
   }
+#else
+    if(event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED){
+    #ifdef WM_DEBUG_LEVEL
+      DEBUG_WM(DEBUG_VERBOSE,F("[EVENT] WIFI_REASON: "),info.wifi_sta_disconnected.reason);
+      #endif
+      if(info.wifi_sta_disconnected.reason == WIFI_REASON_AUTH_EXPIRE || info.wifi_sta_disconnected.reason == WIFI_REASON_AUTH_FAIL){
+        _lastconxresulttmp = 7; // hack in wrong password internally, sdk emit WIFI_REASON_AUTH_EXPIRE on some routers on auth_fail
+      } else _lastconxresulttmp = WiFi.status();
+      #ifdef WM_DEBUG_LEVEL
+      if(info.wifi_sta_disconnected.reason == WIFI_REASON_NO_AP_FOUND) DEBUG_WM(DEBUG_VERBOSE,F("[EVENT] WIFI_REASON: NO_AP_FOUND"));
+      #endif
+      #ifdef esp32autoreconnect
+      #ifdef WM_DEBUG_LEVEL
+        DEBUG_WM(DEBUG_VERBOSE,F("[Event] ARDUINO_EVENT_WIFI_STA_DISCONNECTED, reconnecting"));
+        #endif
+        WiFi.reconnect();
+      #endif
+  }
+  else if(event == ARDUINO_EVENT_SC_SCAN_DONE){
+    uint16_t scans = WiFi.scanComplete();
+    WiFi_scanComplete(scans);
+  }
+#endif
 }
 #endif
 
@@ -3536,7 +3622,10 @@ void WiFiManager::WiFi_autoReconnect(){
       DEBUG_WM(DEBUG_VERBOSE,F("ESP32 event handler enabled"));
       #endif
       using namespace std::placeholders;
-      wm_event_id = WiFi.onEvent(std::bind(&WiFiManager::WiFiEvent,this,_1,_2));
+      WiFiEventFuncCb func = std::bind(&WiFiManager::WiFiEvent,this,_1,_2);
+      wm_event_id = WiFi.onEvent(func);
+      // RvD: seems missing even though OnEvent is no longer handled!
+      WiFi.setAutoReconnect(_wifiAutoReconnect);
     // }
   #endif
 }
@@ -3640,7 +3729,8 @@ void WiFiManager::handleUpdating(){
     error = true;
   }
   if(error) _configPortalTimeout = _configPortalTimeoutSAV;
-	delay(0);
+	feedLoopWDT();
+  delay(10);
 }
 
 // upload and ota done, show status
