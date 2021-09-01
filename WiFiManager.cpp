@@ -18,13 +18,6 @@
 uint8_t WiFiManager::_lastconxresulttmp = WL_IDLE_STATUS;
 #endif
 
-#ifndef HTTPD_USER
-#define HTTPD_USER "admin"
-#endif
-#ifndef HTTPD_PASSWD
-#define HTTPD_PASSWD "1234"
-#endif
-
 /**
  * --------------------------------------------------------------------------------
  *  WiFiManagerParameter
@@ -1240,7 +1233,7 @@ void WiFiManager::handleRequest() {
   if(!_httpdAuthEnabled) return;
   
   DEBUG_WM(DEBUG_DEV,F("DOING AUTH"));
-  bool res = server->authenticate(HTTPD_USER, HTTPD_PASSWD);
+  bool res = server->authenticate(_httpdAuthUsername.c_str(), _httpdAuthPassword.c_str());
   if(!res){
     #ifndef WM_NOAUTH
     server->requestAuthentication(HTTPAuthMethod::BASIC_AUTH); // DIGEST_AUTH
@@ -2764,14 +2757,26 @@ void WiFiManager::setShowPassword(boolean show){
 }
 
 /**
- * toggle httpd password authentication
+ * set httpd password authentication
  * if not enabled, anyone can modify the device settings!
  * @since $dev
  * @access public
- * @param boolean alwaysShow [false]
+ * @param boolean enabled
  */
 void WiFiManager::setHttpdAuthEnable(boolean enabled) {
   _httpdAuthEnabled = enabled;
+}
+
+/**
+ * set httpd credentials
+ * @since $dev
+ * @access public
+ * @param String username
+ * @param String password
+ */
+void WiFiManager::setHttpdAuthCredentials(String username, String password) {
+  _httpdAuthUsername = username;
+  _httpdAuthPassword = password;
 }
 
 /**
