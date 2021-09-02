@@ -1368,6 +1368,23 @@ String WiFiManager::getMenuOut(){
     page += HTTP_PORTAL_MENU[menuId];
   }
 
+  for(auto menuItem : _customMenuItems) {
+    if(menuItem.action == "/param" && _paramsCount == 0) {
+      continue;
+    }
+    else if (menuItem.action == "--") {
+      page += HTTP_FORM_STATIC_HEAD;
+    }
+    else {
+      String pitem = FPSTR(HTTP_PORTAL_CUSTOM_MENU_ITEM_TEMPLATEITEM);
+
+      pitem.replace(FPSTR(T_l), menuItem.action); // set form action
+      pitem.replace(FPSTR(T_t), menuItem.buttonText); // set form action
+      pitem.replace(FPSTR(T_c), menuItem.class_D ? " class='D'" : ""); // set form action
+      page += pitem;
+    }
+  }
+
   return page;
 }
 
@@ -2955,7 +2972,7 @@ void WiFiManager::setMenu(const char * menu[], uint8_t size){
   // DEBUG_WM(getMenuOut());
   #endif
 }
-
+    
 /**
  * setMenu with vector
  * eg.
@@ -2983,6 +3000,25 @@ void WiFiManager::setMenu(std::vector<const char *>& menu){
   #endif
 }
 
+/**
+ * Sets the complete custom menu structure after clearing it
+ * This does not work together with the regular 'setMenu' menu
+ */
+void WiFiManager::setCustomMenuItems(std::initializer_list<custom_menu_item_t> list) {
+  _customMenuItems.clear();
+  _customMenuItems.insert(_customMenuItems.end(), list.begin(), list.end());
+}
+
+/**
+ * Append custom menu item to menu page
+ * This does not work together with the regular 'setMenu' menu
+ * @param String text. Text to display on the menu button
+ * @param String action. Relative url to navigate to
+ * @param boolean class_D. if True, gives the button a red color
+ */
+void WiFiManager::appendCustomMenuItem(String text, String action, boolean class_D) {
+  _customMenuItems.push_back(custom_menu_item_t(action, text, class_D));
+}
 
 /**
  * set params as sperate page not in wifi

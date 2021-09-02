@@ -159,6 +159,15 @@ class WiFiManagerParameter {
 class WiFiManager
 {
   public:
+
+    struct custom_menu_item_t{
+        String  buttonText;
+        String  action;
+        boolean class_D;
+        custom_menu_item_t(String _action, String _text, boolean _class_D = false) : buttonText(_text), action(_action), class_D(_class_D) {
+        }
+    };
+
     WiFiManager(Stream& consolePort);
     WiFiManager();
     ~WiFiManager();
@@ -338,7 +347,10 @@ class WiFiManager
     // see _menutokens for ids
     void          setMenu(std::vector<const char*>& menu);
     void          setMenu(const char* menu[], uint8_t size);
-    
+
+    void          setCustomMenuItems  (std::initializer_list<custom_menu_item_t> list);
+    void          appendCustomMenuItem(String text, String action, boolean class_D = false);
+
     // set the webapp title, default WiFiManager
     void          setTitle(String title);
 
@@ -415,6 +427,7 @@ class WiFiManager
     std::vector<const char *> _menuIdsParams  = {"wifi","param","info","exit"};
     std::vector<const char *> _menuIdsUpdate  = {"wifi","param","info","update","exit"};
     std::vector<const char *> _menuIdsDefault = {"wifi","info","exit","sep","update"};
+    std::vector<custom_menu_item_t> _customMenuItems;
 
     // ip configs @todo struct ?
     IPAddress     _ap_static_ip;
