@@ -39,6 +39,13 @@
 #define WM_NOSOFTAPSSID    // no softapssid() @todo shim
 #endif
 
+#ifndef HTTPD_USER_DEFAULT
+#define HTTPD_USER_DEFAULT "admin"
+#endif
+#ifndef HTTPD_PASSWD_DEFAULT
+#define HTTPD_PASSWD_DEFAULT "1234"
+#endif
+
 // #include "soc/efuse_reg.h" // include to add efuse chip rev to info, getChipRevision() is almost always the same though, so not sure why it matters.
 
 // #define esp32autoreconnect    // implement esp32 autoreconnect event listener kludge, @DEPRECATED
@@ -64,7 +71,7 @@
 #elif defined(ESP32)
 
     // #define STRING2(x) #x
-    // #define STRING(x) STRING2(x)    
+    // #define STRING(x) STRING2(x)
     // #ifdef ESP_IDF_VERSION
     // #pragma message "ESP_IDF_VERSION_MAJOR = " STRING(ESP_IDF_VERSION_MAJOR)
     // #pragma message "ESP_IDF_VERSION_MINOR = " STRING(ESP_IDF_VERSION_MINOR)
@@ -143,13 +150,16 @@ class WiFiManagerParameter {
     int         getValueLength() const;
     int         getLabelPlacement() const;
     virtual const char *getCustomHTML() const;
-    void        setValue(const char *defaultValue, int length);
+    virtual void setValue(const char *value);
 
   protected:
     void init(const char *id, const char *label, const char *defaultValue, int length, const char *custom, int labelPlacement);
 
+    void setInitialValue(const char *defaultValue, int length);
+
   private:
     WiFiManagerParameter& operator=(const WiFiManagerParameter&);
+  protected:
     const char *_id;
     const char *_label;
     char       *_value;
@@ -164,6 +174,15 @@ class WiFiManagerParameter {
 class WiFiManager
 {
   public:
+
+    struct custom_menu_item_t{
+        String  buttonText;
+        String  action;
+        boolean class_D;
+        custom_menu_item_t(String _action, String _text, boolean _class_D = false) : buttonText(_text), action(_action), class_D(_class_D) {
+        }
+    };
+
     WiFiManager(Stream& consolePort);
     WiFiManager();
     ~WiFiManager();
@@ -171,7 +190,7 @@ class WiFiManager
 
     // auto connect to saved wifi, or custom, and start config portal on failures
     boolean       autoConnect();
-    boolean       autoConnect(char const *apName, char const *apPassword = NULL);
+    boolean       autoConnect(char const *apName, char const *apPassword = NULL, bool retryStaConnectInApMode = false);
 
     //manually start the config portal, autoconnect does this automatically on connect failure
     boolean       startConfigPortal(); // auto generates apname
@@ -298,6 +317,13 @@ class WiFiManager
     // toggle showing the saved wifi password in wifi form, could be a security issue.
     void          setShowPassword(boolean show);
     
+	// enable / disable HTTPD authorization for config portal
+	// Usefull when used with e.g. startWebPortal()
+	void          setHttpdAuthEnable(boolean enabled);
+
+    // set httpd authentication username / password
+    void          setHttpdAuthCredentials(String username, String password);
+
     //if false, disable captive portal redirection
     void          setCaptivePortalEnable(boolean enabled);
     
@@ -338,7 +364,10 @@ class WiFiManager
     // see _menutokens for ids
     void          setMenu(std::vector<const char*>& menu);
     void          setMenu(const char* menu[], uint8_t size);
-    
+
+    void          setCustomMenuItems  (std::initializer_list<custom_menu_item_t> list);
+    void          appendCustomMenuItem(String text, String action, boolean class_D = false);
+
     // set the webapp title, default WiFiManager
     void          setTitle(String title);
 
@@ -415,6 +444,7 @@ class WiFiManager
     std::vector<const char *> _menuIdsParams  = {"wifi","param","info","exit"};
     std::vector<const char *> _menuIdsUpdate  = {"wifi","param","info","update","exit"};
     std::vector<const char *> _menuIdsDefault = {"wifi","info","exit","sep","update"};
+    std::vector<custom_menu_item_t> _customMenuItems;
 
     // ip configs @todo struct ?
     IPAddress     _ap_static_ip;
@@ -474,6 +504,7 @@ class WiFiManager
     int            _staShowDns            = 0;     // ternary 1=always show dns, 0=only if set, -1=never(cannot change dns via web!)
     boolean       _removeDuplicateAPs     = true;  // remove dup aps from wifiscan
     boolean       _showPassword           = false; // show or hide saved password on wifi form, might be a security issue!
+    volatile boolean _httpdAuthEnabled       = false; // require httpd authentication when accessing config portal
     boolean       _shouldBreakAfterConfig = false; // stop configportal on save failure
     boolean       _configPortalIsBlocking = true;  // configportal enters blocking loop 
     boolean       _enableCaptivePortal    = true;  // enable captive portal redirection
@@ -492,6 +523,8 @@ class WiFiManager
     const char*   _customHeadElement      = ""; // store custom head element html from user
     String        _bodyClass              = ""; // class to add to body
     String        _title                  = FPSTR(S_brand); // app title -  default WiFiManager
+    String        _httpdAuthUsername      = HTTPD_USER_DEFAULT;
+    String        _httpdAuthPassword      = HTTPD_PASSWD_DEFAULT;
 
     // internal options
     
@@ -586,19 +619,9 @@ class WiFiManager
     bool          WiFiSetCountry();
 
     #ifdef ESP32
-
-    // check for arduino or system event system, handle esp32 arduino v2 and IDF
-    #if defined(ESP_ARDUINO_VERSION) && defined(ESP_ARDUINO_VERSION_VAL)
-    #define WM_ARDUINOVERCHECK ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(2, 0, 0)
-    #ifdef WM_ARDUINOVERCHECK
-    #define WM_ARDUINOEVENTS
-    #endif
-    #endif
-
-    #ifdef WM_ARDUINOEVENTS
-        void   WiFiEvent(WiFiEvent_t event, arduino_event_info_t info);
-    #else
-        void   WiFiEvent(WiFiEvent_t event, system_event_info_t info);
+	// IDF V4.2.x compliance:
+    //void   WiFiEvent(WiFiEvent_t event, system_event_info_t info);
+    void   WiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info);
     #endif
     #endif
 
@@ -642,6 +665,7 @@ class WiFiManager
         DEBUG_MAX       = 4
     } wm_debuglevel_t;
 
+    boolean _retryStaConnectInApMode = false;
     boolean _debug  = true;
     String _debugPrefix = FPSTR(S_debugPrefix);
 

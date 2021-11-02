@@ -46,6 +46,8 @@ const char * const HTTP_PORTAL_MENU[] PROGMEM = {
 "<hr><br/>" // MENU_SEP
 };
 
+const char HTTP_PORTAL_CUSTOM_MENU_ITEM_TEMPLATEITEM[] PROGMEM = "<form action='{l}'  method='get'><button{c}>{t}</button></form><br/>\n";
+
 // const char HTTP_PORTAL_OPTIONS[]   PROGMEM = strcat(HTTP_PORTAL_MENU[0] , HTTP_PORTAL_MENU[3] , HTTP_PORTAL_MENU[7]);
 const char HTTP_PORTAL_OPTIONS[]   PROGMEM = "";
 const char HTTP_ITEM_QI[]          PROGMEM = "<div role='img' aria-label='{r}%' title='{r}%' class='q q-{q} {i} {h}'></div>"; // rssi icons
